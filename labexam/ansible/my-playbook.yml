@@ -1,0 +1,50 @@
+- name: Configure SSL certificates
+  hosts: nginx
+  become: true
+  tasks:
+    - name: Create SSL private directory
+      file:
+        path: /etc/ssl/private
+        state: directory
+        mode: '0700'
+
+    - name: Create SSL certs directory
+      file:
+        path: /etc/ssl/certs
+        state: directory
+        mode: '0755'
+
+    - name: Get IMDSv2 token
+      uri:
+        url: "http://169.254.169.254/latest/api/token"
+        method: PUT
+        headers:
+          X-aws-ec2-metadata-token-ttl-seconds: "3600"
+        return_content: yes
+      register: imdsv2_token
+
+    - name: Get current public IP
+      uri:
+        url: "http://169.254.169.254/latest/meta-data/public-ipv4"
+        headers:
+          X-aws-ec2-metadata-token: "{{ imdsv2_token.content }}"
+        return_content: yes
+      register: public_ip
+
+    - name: Show current public IP
+      debug:
+        msg: "Public IP: {{ public_ip.content }}"
+
+    - name: Generate self-signed SSL certificate
+      command: >
+        openssl req -x509 -nodes -days 365
+        -newkey rsa:2048
+        -keyout /etc/ssl/private/selfsigned.key 
+        -out /etc/ssl/certs/selfsigned.crt 
+        -subj "/CN={{ public_ip.content }}" 
+        -addext "subjectAltName=IP:{{ public_ip.content }}" 
+        -addext "basicConstraints=CA:FALSE"
+        -addext "keyUsage=digitalSignature,keyEncipherment"
+        -addext "extendedKeyUsage=serverAuth"
+      args:
+        creates: /etc/ssl/certs/selfsigned.crt
